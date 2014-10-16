@@ -7,412 +7,98 @@ using System.Threading;
 using System.Text;
 using System.IO;
 
-namespace BiosFramework
+namespace BinarySocket
 {
-    namespace BinarySocket
+    private class SocketBase
     {
-        public class SocketBase
+        protected bool _active = false;
+        protected IPAddress _adress;
+        protected int _port = 15150;
+
+        public string Adress
         {
-            protected const UInt32 build = 4;
-            protected bool _active = false;
-            protected string _srvGuid;
-            protected string _adress = "127.0.0.1";
-            protected int _port = 15150;
-
-            public string Adress
-            {
-                get { return _adress; }
-                set 
-                { 
-                    if (_active)
-                        _adress = value; 
-                }
-            }
-            public int Port
-            {
-                get { return _port; }
-                set 
-                { 
-                    if (_active)
-                        _port = value; 
-                }
-            }
-        }
-
-        public delegate void SimpleEvent(string clGUID);
-        public delegate void MessageEvent(string clGUID, string msg);
-        public delegate void DataRecieve(string clGUID, byte[] data);
-
-        public class ServerBase : SocketBase
-        {
-            public class Connection
-            {
-                private bool _active;
-                private string _GUID;
-                private TcpClient Client;
-                private BinaryReader Reader;
-                private BinaryWriter Writer;
-                private Thread Watch;
-
-                public string GUID
-                {
-                    get { return _GUID; }
-                }
-                public bool Active
-                {
-                    get { return _active; }
-                }
-
-                public event SimpleEvent onDisconnect;
-                public event DataRecieve onRecieve;
-                public event MessageEvent onError;
-
-                private void _error(string msg)
-                {
-                    if (onError != null)
-                        onError(_GUID, msg);
-                }
-                private void read()
-                {
-                    int length;
-                    byte[] buffer;
-                    while (_active)
-                    {
-                        try
-                        {
-                            length = Reader.ReadInt32();    // Читает длину передаваемых данных
-                            if ((buffer = Reader.ReadBytes(length)) != null)
-                                onRecieve(_GUID, buffer); // Пришли двоичные данные
-                        }
-                        catch (EndOfStreamException)
-                        {
-                            CloseConnection();
-                        }
-                        catch (Exception Ex)
-                        {
-                            if (_active)
-                            {
-                                _error(Ex.Message);
-                                CloseConnection();
-                            }
-                        }
-                    }
-                }
-
-                public void Send(byte[] data)
-                {
-                    try
-                    {
-                        Writer.Write(data.Length);
-                        Writer.Write(data);
-                        Writer.Flush();
-                    }
-                    catch (Exception Ex)
-                    {
-                        _error(Ex.Message);
-                        CloseConnection();
-                    }
-                }
-
-                public bool EstablishConnection(string srvGuid)
-                {
-                    try
-                    {
-                        Reader = new BinaryReader(Client.GetStream());
-                        Writer = new BinaryWriter(Client.GetStream());
-                        // Проверяем билд (версию)
-                        if (build == BitConverter.ToUInt32(Reader.ReadBytes(sizeof(UInt32)), 0))
-                            _GUID = Encoding.ASCII.GetString(Reader.ReadBytes(32)); // Версия подходит - считываем GUID
-                        else
-                            Writer.Write(false);
-                    }
-                    catch (Exception Ex)
-                    {
-                        _error(Ex.Message);
-                        CloseConnection();
-                    }
-                    if (_GUID != Guid.Empty.ToString())
-                    {
-                        Watch = new Thread(read);
-                        Watch.IsBackground = true;
-                        _active = true;
-                        Writer.Write(true);
-                        Writer.Write(Encoding.ASCII.GetBytes(srvGuid));
-                        Writer.Flush();
-                        Watch.Start();
-                    }
-                    else
-                        _error("Версия не подходит или клиент закрылся");
-                    return _active;
-                }
-                public void CloseConnection()
-                {
-                    if (_active)
-                    {
-                        _active = false;
-                        try
-                        {
-                            Writer.Close();
-                            Reader.Close();
-                            Client.Close();
-                        }
-                        catch (Exception Ex)
-                        {
-                            _error(Ex.Message);
-                        }
-                        finally
-                        {
-                            if (onDisconnect != null)
-                                onDisconnect(GUID);
-                        }
-                    }
-                }
-                public Connection(TcpClient tClient)
-                {
-                    Client = tClient;
-                    _GUID = Guid.Empty.ToString();
-                    _active = false;
-                }
-            }
-
-            private TcpListener _tcpListener;
-            private Thread _thrListener;
-            private object conn = new object();
-            private Hashtable _connections;
-
-            public event SimpleEvent OnConnect;
-            public event SimpleEvent OnDisconnect;
-            public event SimpleEvent OnStartListening;
-            public event SimpleEvent OnStopListening;
-            public event DataRecieve OnRecieve;
-            public event MessageEvent OnError;
-
-            public bool Active
-            {
-                get { return _active; }
-                set
-                {
-                    switch (value)
-                    {
-                        case true:
-                            if (!_active)
-                                Start();
-                            else
-                                _error("Server", "Server already running");
-                            break;
-                        case false:
-                            if (_active)
-                                Stop();
-                            else
-                                _error("Server", "Server not running");
-                            break;
-                    }
-                }
-            }
-
-            public string GUID
-            {
-                get { return _srvGuid; }
-            }
-            public List<string> Clients
-            {
-                get
-                {
-                    List<string> res = new List<string>();
-                    if (_connections.Count > 0)
-                    {
-                        Monitor.Enter(conn);
-                        foreach (DictionaryEntry c in _connections)
-                            res.Add((string)c.Key);
-                        Monitor.Exit(conn);
-                    }
-                    return res;
-                }
-            }
-            public bool isClient(string clGUID)
-            {
-                return _connections.ContainsKey(clGUID);
-            }
-            public int Count
-            {
-                get { return _connections.Count; }
-            }
-
-            public void Send(string cGUID, byte[] data)
-            {
-                if (_connections.ContainsKey(cGUID))
-                {
-                    Connection t = (Connection)_connections[cGUID];
-                    t.Send(data);
-                    t = null;
-                }
-                else
-                    throw new ArgumentException("Идентификатор должен присутствовать в списке клиентов");
-            }
-            public void Close(string cGUID)
-            {
-                _disconnect(cGUID);
-            }
-            public void CloseAll()
-            {
-                foreach (string cGUID in Clients)
-                    _disconnect(cGUID);
-            }
-
-            private void listen()
-            {
-                if (OnStartListening != null)
-                    OnStartListening("Server");
-                while (_active)
-                {
-                    try
-                    {
-                        _connect(_tcpListener.AcceptTcpClient());
-                    }
-                    catch (SocketException SocketEx)
-                    {
-                        if (_active || SocketEx.SocketErrorCode != SocketError.Interrupted)
-                            _error(Guid.Empty.ToString(), SocketEx.Message);
-                    }
-                    catch (Exception Ex)
-                    {
-                        _error(Guid.Empty.ToString(), Ex.Message);
-                    }
-                }
-                if (OnStopListening != null)
-                    OnStopListening("Server");
-            }
-            private void _connect(TcpClient Client)
-            {
-                Connection t = new Connection(Client);
-                t.EstablishConnection(_srvGuid);
-                if (t.Active)
-                {
-                    t.onDisconnect += _disconnect;
-                    t.onError += _error;
-                    t.onRecieve += _parse;
-                    Monitor.Enter(conn);
-                    _connections.Add(t.GUID, t);
-                    if (OnConnect != null)
-                        OnConnect(t.GUID);
-                    Monitor.Exit(conn);
-                }
-                else
-                    _error("Server", "Неудачная попытка подключения клиента");
-            }
-
-            private void _disconnect(string GUID)
-            {
-                Monitor.Enter(conn);
-                if (_connections.ContainsKey(GUID))
-                {
-                    Connection t = (Connection)_connections[GUID];
-                    t.onDisconnect -= _disconnect;
-                    t.onError -= _error;
-                    t.onRecieve -= _parse;
-                    t.CloseConnection();
-                    _connections.Remove(GUID);
-                    if (OnDisconnect != null)
-                        OnDisconnect(GUID);
-                }
-                Monitor.Exit(conn);
-            }
-            private void _parse(string clGUID, byte[] data)
-            {
-                if (OnRecieve != null)
-                    OnRecieve(clGUID, data);
-            }
-            private void _error(string GUID, string msg)
-            {
-                if (OnError != null)
-                    OnError(GUID, msg);
-            }
-            public void Start()
+            get { return _adress.ToString(); }
+            set 
             {
                 if (!_active)
                 {
-                    try
-                    {
-                        IPAddress adr;
-                        if (!IPAddress.TryParse(_adress, out adr))
-                            adr = IPAddress.Any;
-                        _tcpListener = new TcpListener(adr, _port);
-                        _tcpListener.Start();
-                        _thrListener = new Thread(listen);
-                        _thrListener.IsBackground = true;
-                        _thrListener.Start();
-                        _active = true;
-                    }
-                    catch (Exception Ex)
-                    {
-                        _error("SERVER", Ex.Message);
-                    }
+                    IPAddress curr = _adress;
+                    if (!IPAddress.TryParse(value, out _adress))
+                        _adress = curr;
                 }
-                else
-                    _error("SERVER", "Server already running");
-            }
-            public void Stop()
-            {
-                if (_active)
-                {
-                    _active = false;
-                    _tcpListener.Stop();
-                    CloseAll();
-                }
-                else
-                    _error("SERVER", "Сервер не запущен");
-            }
-            public ServerBase()
-            {
-                _srvGuid = Guid.NewGuid().ToString().Replace("-", "");
-                _connections = new Hashtable();
-                _adress = "0.0.0.0";
-            }
-            ~ServerBase()
-            {
-                CloseAll();
-                if (_tcpListener != null)
-                    _tcpListener.Stop();
             }
         }
-        public class ClientBase : SocketBase
+        public int Port
         {
-            private string _guid;
-            private TcpClient tcpClient;
-            private BinaryWriter Writer;
-            private BinaryReader Reader;
-            private Thread Watch;
-
-            public bool Active
-            {
-                get { return _active; }
-                set
-                {
-                    switch (value)
-                    {
-                        case true:
-                            if (!_active)
-                                Connect(_port, _adress);
-                            else
-                                _error("Already connected");
-                            break;
-                        case false:
-                            if (_active)
-                                Disconnect();
-                            else
-                                _error("Not connected");
-                            break;
-                    }
-                }
+            get { return _port; }
+            set 
+            { 
+                if (!_active && value > 0 && value < 65536)
+                    _port = value; 
             }
+        }
+        public string Location
+        {
+            get { return _adress.ToString() + ':' + _port.ToString(); }
+        }
+    }
+
+    public delegate void SimpleEvent(string info);
+    public delegate void DataRecieve(byte[] data);
+
+    public class ServerBase : SocketBase
+    {
+        public delegate void ServerMessageEvent(string clGUID, string msg);
+        public delegate void ServerDataRecieve(string clGUID, byte[] data);
+
+        public class Connection
+        {
+            private TcpClient Client;
+            private BinaryReader Reader;
+            private BinaryWriter Writer;
+            private Thread Watch;
+            private string _guid;
+
             public string GUID
             {
                 get { return _guid; }
-                set { _guid = value; }
             }
-            public string ServerGUID
+            public bool Connected
             {
-                get { return _srvGuid; }
+                get { return Client.Connected; }
+            }
+
+            public event SimpleEvent onDisconnect;
+            public event ServerDataRecieve onRecieve;
+            public event ServerMessageEvent onError;
+
+            private void _error(string msg)
+            {
+                if (onError != null)
+                    onError(_guid, msg);
+            }
+            private void read()
+            {
+                int length;
+                byte[] buffer;
+                while (Client.Connected)
+                {
+                    try
+                    {
+                        length = Reader.ReadInt32();    // Читает длину передаваемых данных
+                        if ((buffer = Reader.ReadBytes(length)) != null)
+                            onRecieve(_guid, buffer); // Пришли двоичные данные
+                    }
+                    catch (EndOfStreamException)
+                    {
+                        CloseConnection();
+                    }
+                    catch (Exception Ex)
+                    {
+                        _error(Ex.Message);
+                        CloseConnection();
+                    }
+                }
             }
 
             public void Send(byte[] data)
@@ -426,118 +112,353 @@ namespace BiosFramework
                 catch (Exception Ex)
                 {
                     _error(Ex.Message);
-                    Disconnect();
+                    CloseConnection();
                 }
             }
 
-            private void read()
+            public bool EstablishConnection()
             {
-                int length;
-                byte[] buffer;
+                try
+                {
+                    Reader = new BinaryReader(Client.GetStream());
+                    Writer = new BinaryWriter(Client.GetStream());
+                    Watch = new Thread(read);
+                    Watch.IsBackground = true;
+                    Watch.Start();
+                }
+                catch (Exception Ex)
+                {
+                    _error(Ex.Message);
+                    CloseConnection();
+                }
+                return Client.Connected;
+            }
+            public void CloseConnection()
+            {
+                try
+                {
+                    if (Writer != null)
+                        Writer.Close();
+                    if (Reader != null)
+                        Reader.Close();
+                    Client.Close();
+                }
+                catch (Exception Ex)
+                {
+                    _error(Ex.Message);
+                }
+                finally
+                {
+                    if (onDisconnect != null)
+                        onDisconnect(_guid);
+                }
+            }
+            public Connection(TcpClient tClient)
+            {
+                Client = tClient;
+                _guid = Guid.NewGuid().ToString().Replace("-", "");
+                Reader = null;
+                Writer = null;
+            }
+        }
+
+        private TcpListener _tcpListener;
+        private Thread _thrListener;
+        private Hashtable _connections;
+        private object conn = new object();
+        private string _srvGuid;
+
+        public event SimpleEvent OnStartListening;
+        public event SimpleEvent OnStopListening;
+        public event SimpleEvent OnConnect;
+        public event SimpleEvent OnDisconnect;
+        public event ServerMessageEvent OnError;
+        public event ServerDataRecieve OnRecieve;
+
+        public string GUID
+        {
+            get { return _srvGuid; }
+        }
+        public List<string> Clients
+        {
+            get
+            {
+                List<string> res = new List<string>();
+                if (_connections.Count > 0)
+                {
+                    Monitor.Enter(conn);
+                    foreach (DictionaryEntry c in _connections)
+                        res.Add((string)c.Key);
+                    Monitor.Exit(conn);
+                }
+                return res;
+            }
+        }
+        public int Count
+        {
+            get { return _connections.Count; }
+        }
+
+        public void Send(string clGUID, byte[] data)
+        {
+            if (_connections.ContainsKey(clGUID))
+            {
+                Connection t = (Connection)_connections[clGUID];
+                t.Send(data);
+            }
+            else
+                throw new ArgumentException("Идентификатор должен присутствовать в списке клиентов");
+        }
+        public void Close(string clGUID)
+        {
+            _disconnect(clGUID);
+        }
+        public void CloseAll()
+        {
+            foreach (string cli in Clients)
+                _disconnect(cli);
+        }
+
+        private void listen()
+        {
+            _tcpListener = new TcpListener(_adress, _port);
+            _tcpListener.Start();
+            if (OnStartListening != null)
+                OnStartListening(Location);
+            try
+            {
                 while (_active)
                 {
-                    try
-                    {
-                        length = Reader.ReadInt32();    // Читает длину передаваемых данных
-                        if ((buffer = Reader.ReadBytes(length)) != null)
-                        {
-                            if (OnRecieve != null)
-                                OnRecieve(_guid, buffer); // Пришли двоичные данные
-                        }
-                    }
-                    catch (IOException)
-                    {
-                        Disconnect();
-                    }
-                    catch (Exception Ex)
-                    {
-                        if (_active)
-                        {
-                            _error(Ex.Message);
-                            Disconnect();
-                        }
-                    }
+                    _connect(_tcpListener.AcceptTcpClient());
                 }
             }
+            catch (SocketException SocketEx)
+            {
+                if (_active || SocketEx.SocketErrorCode != SocketError.Interrupted)
+                    _error(_srvGuid, SocketEx.Message);
+            }
+            catch (Exception Ex)
+            {
+                _error(_srvGuid, Ex.Message);
+            }
+            finally
+            {
+                _tcpListener.Stop();
+                if (OnStopListening != null)
+                    OnStopListening(Location);
+            }
+        }
 
-            public event SimpleEvent OnConnect;
-            public event SimpleEvent OnDisconnect;
-            public event DataRecieve OnRecieve;
-            public event MessageEvent OnError;
-    
-            private void _error(string Message)
+        private void _connect(TcpClient Client)
+        {
+            Connection t = new Connection(Client);
+            if (t.EstablishConnection())
             {
-                if (OnError != null)
-                    OnError(_guid, Message);
-            }
-    
-            public void Connect(int nPort, string nAdress)
-            {
-                _port = nPort;
-                _adress = nAdress;
-                Connect();
-            }
-            private void Connect()
-            {
-                if (!_active)
+                t.onDisconnect += _disconnect;
+                if (t.Connected)
                 {
-                    bool connected = false;
-                    try
+                    Monitor.Enter(conn);
+                    _connections.Add(t.GUID, t);
+                    Monitor.Exit(conn);
+                    t.onError += _error;
+                    t.onRecieve += _parse;
+                }
+                else
+                    t.onDisconnect -= _disconnect;
+                if (OnConnect != null)
+                    OnConnect(t.GUID);
+            }
+            else
+                _error(_srvGuid, "Неудачная попытка подключения клиента");
+        }
+        private void _disconnect(string clGUID)
+        {
+            Monitor.Enter(conn);
+            if (_connections.ContainsKey(clGUID))
+            {
+                Connection t = (Connection)_connections[clGUID];
+                t.onDisconnect -= _disconnect;
+                t.onError -= _error;
+                t.onRecieve -= _parse;
+                t.CloseConnection();
+                _connections.Remove(clGUID);
+                if (OnDisconnect != null)
+                    OnDisconnect(clGUID);
+            }
+            else
+                throw new ArgumentException("Идентификатор должен присутствовать в списке клиентов");
+            Monitor.Exit(conn);
+        }
+        private void _parse(string clGUID, byte[] data)
+        {
+            if (OnRecieve != null)
+                OnRecieve(clGUID, data);
+        }
+        private void _error(string clGUID, string msg)
+        {
+            if (OnError != null)
+                OnError(clGUID, msg);
+        }
+
+        public void Start()
+        {
+            if (!_active)
+            {
+                try
+                {
+                    _thrListener = new Thread(listen);
+                    _thrListener.IsBackground = true;
+                    _active = true;
+                    _thrListener.Start();
+                }
+                catch (Exception Ex)
+                {
+                    _error(_srvGuid, Ex.Message);
+                }
+            }
+            else
+                _error(_srvGuid, "Server already running");
+        }
+        public void Stop()
+        {
+            if (_active)
+            {
+                _active = false;
+                CloseAll();
+            }
+            else
+                _error(_srvGuid, "Сервер не запущен");
+        }
+        public ServerBase()
+        {
+            _connections = new Hashtable();
+            _adress = IPAddress.Any;
+        }
+        ~ServerBase()
+        {
+            Stop();
+        }
+    }
+    public class ClientBase : SocketBase
+    {
+        private TcpClient tcpClient;
+        private BinaryWriter Writer;
+        private BinaryReader Reader;
+        private Thread Watch;
+
+        public void Send(byte[] data)
+        {
+            try
+            {
+                Writer.Write(data.Length);
+                Writer.Write(data);
+                Writer.Flush();
+            }
+            catch (Exception Ex)
+            {
+                _error(Ex.Message);
+                Disconnect();
+            }
+        }
+
+        private void read()
+        {
+            int length;
+            byte[] buffer;
+            while (_active)
+            {
+                try
+                {
+                    length = Reader.ReadInt32();    // Читает длину передаваемых данных
+                    if ((buffer = Reader.ReadBytes(length)) != null)
                     {
-                        tcpClient = new TcpClient(_adress, _port);
-                        Writer = new BinaryWriter(tcpClient.GetStream());
-                        Reader = new BinaryReader(tcpClient.GetStream());
-                        Writer.Write(BitConverter.GetBytes(build));
-                        Writer.Write(Encoding.ASCII.GetBytes(GUID));
-                        Writer.Flush();
-                        connected = BitConverter.ToBoolean(Reader.ReadBytes(sizeof(bool)), 0);
-                        if (connected)
-                            _srvGuid = Encoding.ASCII.GetString(Reader.ReadBytes(32));
+                        if (OnRecieve != null)
+                            OnRecieve(buffer); // Пришли двоичные данные
                     }
-                    catch (Exception Ex)
+                }
+                catch (IOException)
+                {
+                    Disconnect();
+                }
+                catch (Exception Ex)
+                {
+                    if (_active)
                     {
                         _error(Ex.Message);
                         Disconnect();
                     }
-                    if (connected)
-                    {
-                        Watch = new Thread(read);
-                        Watch.IsBackground = true;
-                        _active = true;
-                        Watch.Start();
-                        if (OnConnect != null)
-                            OnConnect(_srvGuid);
-                    }
-                    else
-                        Disconnect();
-                }
-                else
-                    _error("Клиент уже подключен");
-            }
-            public void Disconnect()
-            {
-                if (_active)
-                {
-                    _active = false;
-                    if (tcpClient != null)
-                    {
-                        Writer.Close();
-                        Reader.Close();
-                        tcpClient.Close();
-                    }
-                    if (OnDisconnect != null)
-                        OnDisconnect(_guid);
                 }
             }
+        }
 
-            public ClientBase()
+        public event SimpleEvent OnConnect;
+        public event SimpleEvent OnDisconnect;
+        public event SimpleEvent OnError;
+        public event DataRecieve OnRecieve;
+    
+        private void _error(string Message)
+        {
+            if (OnError != null)
+                OnError(Message);
+        }
+    
+        public void Connect(int nPort, string nAdress)
+        {
+            Port = nPort;
+            Adress = nAdress;
+            if (_port == nPort && _adress.ToString() == nAdress)
+                Connect();
+        }
+        private void Connect()
+        {
+            if (!_active)
             {
-                _guid = Guid.NewGuid().ToString().Replace("-", "");
+                try
+                {
+                    tcpClient = new TcpClient(new IPEndPoint(_adress, _port));
+                    Writer = new BinaryWriter(tcpClient.GetStream());
+                    Reader = new BinaryReader(tcpClient.GetStream());
+                    Watch = new Thread(read);
+                    Watch.IsBackground = true;
+                    _active = true;
+                    if (OnConnect != null)
+                        OnConnect(Location);
+                    Watch.Start();
+                }
+                catch (Exception Ex)
+                {
+                    _error(Ex.Message);
+                    Disconnect();
+                }
             }
-            ~ClientBase()
+            else
+                _error("Клиент уже подключен");
+        }
+        public void Disconnect()
+        {
+            if (_active)
             {
-                Disconnect();
+                _active = false;
+                if (tcpClient != null)
+                {
+                    if (Writer != null)
+                        Writer.Close();
+                    if (Reader != null)
+                        Reader.Close();
+                    tcpClient.Close();
+                }
+                if (OnDisconnect != null)
+                    OnDisconnect(Location);
             }
+        }
+
+        public ClientBase()
+        {
+            Adress = "127.0.0.1";
+        }
+        ~ClientBase()
+        {
+            Disconnect();
         }
     }
 }
