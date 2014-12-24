@@ -11,7 +11,7 @@ namespace MyLib
 {
     namespace BinarySocket
     {
-        private class SocketBase
+        public class SocketBase
         {
             protected bool _active = false;
             protected IPAddress _adress;

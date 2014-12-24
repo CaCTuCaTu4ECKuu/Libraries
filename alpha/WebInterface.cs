@@ -20,6 +20,13 @@ public static class UserAgent
     public const string Chrome_32x0x1667x0 = "Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1667.0 Safari/537.36";
     public const string Chrome_31x0x1650x16 = "Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/31.0.1650.16 Safari/537.36";
 
+    public const string Yandex13x12x1599x12785 = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.12785 YaBrowser/13.12.1599.12785 Safari/537.36";
+    public const string Yandex13x12x1599x13014 = "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.13014 YaBrowser/13.12.1599.13014 Safari/537.36";
+    public const string Yandex14x2x1700x12599 = "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 YaBrowser/14.2.1700.12599 Safari/537.36";
+    public const string W7x64Yandex14x2x1700x12599 = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 YaBrowser/14.2.1700.12599 Safari/537.36";
+    public const string Amigo = "Mozilla/5.0 (Windows NT 6.3) AppleWebKit/537.36 (KHTML like Gecko) Chrome/32.0.1703.124 Safari/537.36 MRCHROME SOC";
+    public const string MailRu = "";
+
     public const string Opera_12x14 = "Opera/9.80 (Windows NT 6.0) Presto/2.12.388 Version/12.14";
     public const string Opera_11x51 = "Opera/9.80 (Windows NT 5.1; U; ru) Presto/2.9.168 Version/11.51";
     public const string Opera_9x64 = "Opera/9.64 (Windows NT 5.1; U; ru) Presto/2.1.1";
@@ -68,6 +75,11 @@ public class TWebInterface
     private bool _AutoCookies;
     private bool _useDefaultHeaders;
     private string _URI = "";
+
+    private const int _waitTimeoutStep = 1000;
+    private const int _maxWaitTimeout = 30000;
+    private int _waitTimeout = _waitTimeoutStep;
+
     public string UserAgent
     {
         get { return _UserAgent; }
@@ -268,6 +280,7 @@ public class TWebInterface
     /// </summary>
     public HttpWebResponse webRequest(string URL, Hashtable headers, Hashtable parametrs, Hashtable cookies, postData[] data, string method)
     {
+        _waitTimeout = _waitTimeoutStep;
         ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
         Uri target;
         try
@@ -369,6 +382,7 @@ public class TWebInterface
                     return webRequest(URL, headers, parametrs, cookies, data, method);
             }
         }
+
         // Getting page
         try
         {
@@ -378,10 +392,16 @@ public class TWebInterface
         }
         catch (WebException ex)
         {
-            toLog(ex.Message, modes.Errors);
+            // toLog(ex.Message, modes.Errors);
+            Console.WriteLine(ex.Message);
             if (ex.Status == WebExceptionStatus.Timeout)
             {
-                WebResponse response = ex.Response;
+                request = null;
+
+                if (_waitTimeout < _maxWaitTimeout)
+                    _waitTimeout += _waitTimeoutStep;
+                Thread.Sleep(_waitTimeout);
+
                 return webRequest(URL, headers, parametrs, cookies, data, method);
             }
             else
@@ -531,6 +551,13 @@ public static class externalIP
     private static string page;
     private static bool _watchIP = false;
     private static Thread _watcher;
+
+    private static Thread loader;
+    private static string l_answer;
+    private const int waitStep = 100;
+    private const int maxWait = 1000;
+    private static int wait = waitStep;
+
     /// <summary>
     /// Время между проверками IP-адреса
     /// </summary>
@@ -546,37 +573,49 @@ public static class externalIP
     {
         string l_ip = Get();
         string ip = "";
-        if (l_ip != "")
-        {
-            while (_watchIP)
-            {                
-                if ((ip = Get()) != l_ip)
-                {
-                    Thread.Sleep(50);
-                    l_ip = ip;
-                    if (OnChange != null)
-                        OnChange(ip);
-                }
-                else
-                    Thread.Sleep(Interval);
+        while (_watchIP)
+        {                
+            if ((ip = Get()) != l_ip)
+            {
+                l_ip = ip;
+                if (OnChange != null)
+                    OnChange(ip);
             }
+            else
+                Thread.Sleep(Interval);
         }
     }
 
+    private static void get()
+    {
+        page = string.Join(" ", HTTP.getURL(url));
+        page = Regex.Match(page, "<big id=\"d_clip_button\">(\\d{1,3}\\.){3}\\d{1,3}").ToString();
+        if (page != "")
+            l_answer = page.Remove(0, 24);
+    }
     /// <summary>
     /// Получить текущий внешний IP-адрес;
     /// </summary>
     public static string Get()
     {
-        page = string.Join(" ", HTTP.getURL(url));
-        page = Regex.Match(page, "<big id=\"d_clip_button\">(\\d{1,3}\\.){3}\\d{1,3}").ToString();
-        if (page == "")
+        l_answer = "";
+        wait = waitStep;
+        while (l_answer == "")
         {
-            Thread.Sleep(50);
-            return Get();
+            try
+            {
+                loader = new Thread(get);
+                loader.Start();
+                loader.Join(wait);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Ошибка при получении ай-пи. {0}", ex.Message);
+                // nothing to do here
+            }
+            if (wait < maxWait)
+                wait += waitStep;
         }
-        else
-            page = page.Remove(0, 24);
         return page;
     }
     /// <summary>
@@ -597,7 +636,17 @@ public static class externalIP
                 }
             }
             else
+            {
                 _watchIP = value;
+                try
+                {
+                    _watcher.Join(Interval);
+                }
+                catch (Exception ex)
+                { 
+                    //Забей и выкинь
+                }
+            }
         }
     }
 }

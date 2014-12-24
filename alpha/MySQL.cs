@@ -7,7 +7,6 @@ using MySql.Data.MySqlClient;
 public class TMySQL
 {
     public const string DateTimeFormat = "yyyy-MM-dd HH:mm:ss";
-    public const IFormatProvider FormatProvier = CultureInfo.InvariantCulture.DateTimeFormat;
     private bool _ready;
     public bool autoRetryOnTimeout;
     public int minTimeout;
