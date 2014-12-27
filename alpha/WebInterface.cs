@@ -78,7 +78,7 @@ public class TWebInterface
 
     private const int _waitTimeoutStep = 1000;
     private const int _maxWaitTimeout = 30000;
-    private int _waitTimeout = _waitTimeoutStep;
+    private int _waitTimeout;
 
     public string UserAgent
     {
@@ -203,6 +203,7 @@ public class TWebInterface
         _Redirect = true;
         _KeepAlive = true;
         _Timeout = 3000;
+        _waitTimeout = _waitTimeoutStep;
         Cookies = new CookieContainer();
         _AutoCookies = true;
         DefaultHeaders = new Hashtable();
@@ -278,8 +279,11 @@ public class TWebInterface
     /// <summary> 
     /// Return null in case of fail
     /// </summary>
-    public HttpWebResponse webRequest(string URL, Hashtable headers, Hashtable parametrs, Hashtable cookies, postData[] data, string method)
+    public HttpWebResponse webRequest(string URL, Hashtable headers, Hashtable parametrs, Hashtable cookies, postData[] data, string method, int TryCount)
     {
+        int Tcount = TryCount;
+        if (Tcount > 10)
+            return null;
         _waitTimeout = _waitTimeoutStep;
         ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
         Uri target;
@@ -379,7 +383,7 @@ public class TWebInterface
             catch (WebException ex)
             {
                 if (ex.Status == WebExceptionStatus.Timeout)
-                    return webRequest(URL, headers, parametrs, cookies, data, method);
+                    return webRequest(URL, headers, parametrs, cookies, data, method, Tcount);
             }
         }
 
@@ -393,16 +397,16 @@ public class TWebInterface
         catch (WebException ex)
         {
             // toLog(ex.Message, modes.Errors);
-            Console.WriteLine(ex.Message);
+            Console.WriteLine(string.Format("Try {0} failed with error: {1}", Tcount, ex.Message));
+            Tcount++;
             if (ex.Status == WebExceptionStatus.Timeout)
             {
                 request = null;
-
-                if (_waitTimeout < _maxWaitTimeout)
-                    _waitTimeout += _waitTimeoutStep;
-                Thread.Sleep(_waitTimeout);
-
-                return webRequest(URL, headers, parametrs, cookies, data, method);
+                if (Tcount < 30)
+                    Thread.Sleep(_waitTimeoutStep * Tcount);
+                else
+                    Thread.Sleep(_maxWaitTimeout);
+                return webRequest(URL, headers, parametrs, cookies, data, method, Tcount);
             }
             else
             {
@@ -430,7 +434,11 @@ public class TWebInterface
     }
     public string[] getURL(string url, Hashtable headers, Hashtable cookies)
     {
-        HttpWebResponse answer = webRequest(url, headers, null, cookies, null, "GET");
+        HttpWebResponse answer = null;
+        while (answer == null)
+        {
+            answer = webRequest(url, headers, null, cookies, null, "GET", 1);
+        }
         if (answer != null)
         {
             return StreamToArray(answer.GetResponseStream(), answer.CharacterSet);
@@ -468,7 +476,11 @@ public class TWebInterface
     }
     public string[] postURL(string url, Hashtable headers, Hashtable parametrs, Hashtable cookies, postData[] data)
     {
-        HttpWebResponse answer = webRequest(url, headers, parametrs, cookies, data, "POST");
+        HttpWebResponse answer = null;
+        while (answer == null)
+        {
+            answer = webRequest(url, headers, parametrs, cookies, data, "POST", 1);
+        }
         if (answer != null)
             return StreamToArray(answer.GetResponseStream(), answer.CharacterSet);
         else
@@ -485,7 +497,11 @@ public class TWebInterface
     }
     public Stream getData(string url, Hashtable headers, Hashtable cookies)
     {        
-        HttpWebResponse answer = webRequest(url, headers, null, cookies, null, "GET");
+        HttpWebResponse answer = null;
+        while (answer == null)
+        {
+            answer = webRequest(url, headers, null, cookies, null, "GET", 1);
+        }
         if (answer != null)
             return answer.GetResponseStream();
         else
@@ -631,8 +647,8 @@ public static class externalIP
                 if (!_watchIP)
                 {
                     _watchIP = value;
-                    _watcher = new Thread(Watcher);
-                    _watcher.Start();
+                    //_watcher = new Thread(Watcher);
+                    //_watcher.Start();
                 }
             }
             else
@@ -640,7 +656,7 @@ public static class externalIP
                 _watchIP = value;
                 try
                 {
-                    _watcher.Join(Interval);
+                    //_watcher.Join(Interval);
                 }
                 catch (Exception ex)
                 { 
