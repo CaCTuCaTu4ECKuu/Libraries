@@ -7,6 +7,8 @@ using System.Text.RegularExpressions;
 using System.Net;
 using System.IO;
 using System.Net.Sockets;
+using System.Threading.Tasks;
+
 
 namespace MyLib
 {
@@ -39,374 +41,11 @@ namespace MyLib
                 }
                 return headers;
             }
-        }
-
-        public enum RequestMethod { GET, POST }
-        public class HttpAnswer
-        {
-            private HttpWebResponse _response;
-            private Stream _responseStream;
-            private List<string> _page;
-            private Hashtable _headers;
-
-            public string URL
-            {
-                get { return _response.ResponseUri.ToString(); }
-            }
-            public HttpStatusCode Code
-            {
-                get { return _response.StatusCode; }
-            }
-            public string CharacterSet
-            {
-                get { return _response.CharacterSet; }
-            }
-            public string Header(string name)
-            {
-                if (_headers == null)
-                    _headers = Headers;
-                if (_headers.ContainsKey(name))
-                    return (string)_headers[name];
-                else
-                    return "";
-
-            }
-            public Hashtable Headers
-            {
-                get
-                {
-                    if (_headers == null)
-                    {
-                        _headers = new Hashtable();
-                        foreach (string h in _response.Headers.AllKeys)
-                            _headers.Add(h, _response.Headers[h]);
-                    }
-                    return _headers;
-                }
-            }
-            public CookieCollection Cookies
-            {
-                get { return _response.Cookies; }
-            }
-            public Stream ResponseStream
-            {
-                get 
-                {
-                    if (_responseStream == null)
-                        _responseStream = _response.GetResponseStream();
-                    return _responseStream;
-                }
-            }
-            public List<string> Lines
-            {
-                get
-                {
-                    if (_response != null)
-                    {
-                        if (_page == null)
-                            _page = WebTools.GetPage(ResponseStream, _response.CharacterSet);
-                        return _page;
-                    }
-                    return new List<string>();
-                }
-            }
-            public string Page
-            {
-                get { return string.Join("\n", Lines); }
-            }
-            public HttpAnswer(HttpWebResponse response)
-            {
-                _response = response;
-                _responseStream = null;
-                _page = null;
-                _headers = null;
-            }
-        }
-        public class HttpRequest
-        {
-            private Uri _adress;
-            private RequestMethod _method;
-            private byte _wwwFormUrlEncoded;
-            private Hashtable _headers;
-            private CookieCollection _cookies;
-            private Hashtable _parametrs;
-            private Hashtable _data;
-
-            private PirateHTTP _browser;
-            private HttpAnswer _answer;
-            private bool _requestChanged;
-
-            private void rc()
-            {
-                _requestChanged = true;
-            }
-            public void AddParametr(string name, string value)
-            {
-                if (name != "")
-                {
-                    if (_parametrs.ContainsKey(name))
-                        _parametrs[name] = value;
-                    else
-                        _parametrs.Add(name, value);
-                    rc();
-                }
-            }
-            public void AddParametrs(Hashtable parametrs)
-            {
-                foreach (DictionaryEntry e in parametrs)
-                    AddParametr((string)e.Key, (string)e.Value);
-            }
-            public void AddHeader(string name, string value)
-            {
-                if (name != "")
-                {
-                    if (_headers.ContainsKey(name))
-                        _headers[name] = value;
-                    else
-                        _headers.Add(name, value);
-                    rc();
-                }
-            }
-            public void AddHeaders(Hashtable headers)
-            {
-                foreach (DictionaryEntry e in headers)
-                    AddHeader((string)e.Key, (string)e.Value);
-            }
-            public void AddCookies(CookieCollection cookies)
-            {
-                _cookies.Add(cookies);
-                rc();
-            }
-            public void AddCookie(string name, string value)
-            {
-                AddCookie(new Cookie(name, value));
-            }
-            public void AddCookie(Cookie cookie)
-            {
-                _cookies.Add(cookie);
-                rc();
-            }
-            public void AddData(string name, string contentType, byte[] data, Hashtable parametrs)
-            {
-                Hashtable res = new Hashtable();
-                if (contentType != "")
-                    res.Add("content", contentType);
-                res.Add("data", data);
-                if (parametrs != null)
-                    res.Add("parametrs", parametrs);
-                else
-                    res.Add("parametrs", new Hashtable());
-                
-                if (_data.ContainsKey(name))
-                    _data[name] = res;
-                else
-                    _data.Add(name, res);
-
-                if (_wwwFormUrlEncoded == 0)
-                    _wwwFormUrlEncoded = 1;
-                rc();
-            }
-            public void AddData(string name, string contentType, byte[] data, string fileName)
-            {
-                Hashtable p = new Hashtable();
-                p.Add("filename", fileName);
-                AddData(name, contentType, data, p);
-            }
-            public void AddData(string name, string value)
-            {
-                AddData(name, "", Encoding.ASCII.GetBytes(value), (Hashtable)null);
-            }
-
-            public void ResetData()
-            {
-                _data = new Hashtable();
-                if (_wwwFormUrlEncoded == 1)
-                    _wwwFormUrlEncoded = 0;
-                rc();
-            }
-            public void ResetCookies()
-            {
-                _cookies = new CookieCollection();
-                rc();
-            }
-            public void ResetHeaders()
-            {
-                _headers = new Hashtable();
-                rc();
-            }
-            public void ResetParametrs()
-            {
-                _parametrs = new Hashtable();
-                rc();
-            }
-
-            public bool XMLHttpRequest
-            {
-                get { return _headers.ContainsKey("X-Requested-With"); }
-                set
-                {
-                    if (value && !XMLHttpRequest)
-                    {
-                        _headers.Add("X-Requested-With", "XMLHttpRequest");
-                        rc();
-                    }
-                    else if (!value && XMLHttpRequest)
-                    {
-                        _headers.Remove("X-Requested-With");
-                        rc();
-                    }
-                }
-            }
-            public bool WWWFormUrlEncoded
-            {
-                get { return _wwwFormUrlEncoded == 0; }
-                set 
-                {
-                    byte ov = _wwwFormUrlEncoded;
-                    if (value)
-                        _wwwFormUrlEncoded = 2;
-                    else if (_data.Count == 0)
-                        _wwwFormUrlEncoded = 0;
-                    else
-                        _wwwFormUrlEncoded = 1;
-                    if (ov != _wwwFormUrlEncoded)
-                        rc();
-                }
-            }
-            public Uri URL
-            {
-                get { return _adress; }
-            }
-            public RequestMethod Method
-            {
-                get { return _method; }
-            }
-            public Hashtable Headers
-            {
-                get { return _headers; }
-            }
-            public CookieCollection Cookies
-            {
-                get { return _cookies; }
-            }
-            public Hashtable Parametrs
-            {
-                get { return _parametrs; }
-            }
-            public Hashtable Data
-            {
-                get { return _data; }
-            }
-
-            public HttpAnswer GetAnswer(string userAgent, bool force)
-            {
-                if (_browser == null)
-                {
-                    _browser = new PirateHTTP();
-                    _browser.AutoCookies = false;
-                    _browser.Redirect = true;
-                    _requestChanged = true;
-                }
-                if (_browser.UserAgent != userAgent)
-                {
-                    _browser.UserAgent = userAgent;
-                    _requestChanged = true;
-                }
-                if (_requestChanged || force)
-                    _answer = _browser.getAnswer(this);
-                _requestChanged = false;
-                return _answer;
-            }
-            public HttpAnswer GetAnswer(string userAgent)
-            { return GetAnswer(userAgent, false); }
-            private void reset(Uri adr, RequestMethod m)
-            {
-                _adress = adr;
-                _method = m;
-                _wwwFormUrlEncoded = 0;
-                _browser = null;
-                _answer = null;
-                _requestChanged = false;
-                ResetHeaders();
-                ResetParametrs();
-                ResetCookies();
-                ResetData();
-            }
-            public HttpRequest(RequestMethod method, string url)
-            {
-                reset(new Uri(url), method);
-            }
-            public HttpRequest(RequestMethod method, string url, Hashtable parametrs)
-            {
-                reset(new Uri(url), method);
-                AddParametrs(parametrs);
-            }
-            public HttpRequest(string url)
-            {
-                reset(new Uri(url), RequestMethod.GET);
-            }
-        }
-
-        public partial class PirateHTTP
-        {
-            private string _userAgent;
-            private bool _autoRedirect;
-            private bool _keepAlive;
-            private int _timeout;
-            private bool _useDefaultHeaders;
-            private bool _autoCookies;
-            private Hashtable _headers;
-            private CookieContainer _cookies;
-
-            public string UserAgent
-            {
-                get { return _userAgent; }
-                set { _userAgent = value; }
-            }
-            public bool Redirect
-            {
-                get { return _autoRedirect; }
-                set { _autoRedirect = value; }
-            }
-            public bool AutoCookies
-            {
-                get { return _autoCookies; }
-                set { _autoCookies = value; }
-            }
-            public bool KeepAlive
-            {
-                get { return _keepAlive; }
-                set { _keepAlive = value; }
-            }
-            public int Timeout
-            {
-                get { return _timeout; }
-                set { _timeout = value; }
-            }
-            public bool UseDefaultHeaders
-            {
-                get { return _useDefaultHeaders; }
-                set { _useDefaultHeaders = value; }
-            }
-            public Hashtable DefaultHeaders
-            {
-                get { return _headers; }
-                set { _headers = value; }
-            }
-            public CookieCollection AllCookies
-            {
-                get { return WebTools.parseCookies(_cookies); }
-            }
-            public CookieCollection Cookies(string domain)
-            {
-                return _cookies.GetCookies(new Uri(domain));
-            }
-
-            private string getBoundary(string UserAgent)
+            public static string getBoundary(string userAgent)
             {
                 Random r = new Random();
                 string res = "";
-                switch (UserAgent)
+                switch (userAgent)
                 {
                     case Browser.Chrome_W7_x64_v38x0x2125x101:
                         res = "----WebKitFormBoundary";
@@ -419,170 +58,504 @@ namespace MyLib
                 }
                 return res;
             }
-            private HttpWebRequest assambleRequest(HttpRequest info)
+        }
+
+        public enum RequestMethod { GET, HEAD, POST }
+
+        /// <summary>
+        /// Данные с бинарным содержимым
+        /// </summary>
+        public class MultipartData
+        {
+            /// <summary>
+            /// Весь заголовок бинарного вложения, все поля и атрибуты в одной строке
+            /// https://www.ietf.org/rfc/rfc2388.txt
+            /// </summary>
+            public string Header
             {
-                ServicePointManager.ServerCertificateValidationCallback = delegate { return true; }; // Securiy? Not here
-                ServicePointManager.DefaultConnectionLimit = 1000;
+                get
+                {
+                    string res = "content-disposition: form-data; name=\"" + Name + '"';
+                    if (!string.IsNullOrEmpty(FileName))
+                        res += "; filename=\"" + FileName + "\\\r\\n";
 
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(info.URL);
-                request.ServicePoint.Expect100Continue = false; // strange shit should be disabled
-                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-                request.ProtocolVersion = HttpVersion.Version11;
+                    if (!string.IsNullOrEmpty(ContentType))
+                        res += "content-type: " + ContentType;
+                    if (!string.IsNullOrEmpty(Charset))
+                        res += ";charset=" + Charset + "\\\r\\n";
 
-                Hashtable headers = new Hashtable(info.Headers);
-                // Base Settings
-                request.UserAgent = _userAgent;
-                request.KeepAlive = _keepAlive;
-                if (_timeout > 0)
-                    request.Timeout = _timeout;
-                request.Method = info.Method.ToString("F");
-
-                // Situation Settings
-                request.AllowAutoRedirect = _autoRedirect;
-                if (headers.ContainsKey("Accept"))
-                {
-                    request.Accept = (string)headers["Accept"];
-                    headers.Remove("Accept");
+                    if (!string.IsNullOrEmpty(ContentTransferEncoding))
+                        res += "content-transfer-encoding: " + ContentTransferEncoding + "\\\r\\n";
+                    return res;
                 }
-                if (headers.ContainsKey("Referer"))
-                {
-                    request.Referer = (string)headers["Referer"];
-                    headers.Remove("Referer");
-                }
-                if (headers.ContainsKey("Expect"))
-                {
-                    request.Expect = (string)headers["Expect"];
-                    headers.Remove("Expect");
-                }
-                if (headers.ContainsKey("Host"))
-                {
-                    request.Host = (string)headers["Host"];
-                    headers.Remove("Host");
-                }
-
-                // Loading Headers
-                foreach (DictionaryEntry h in headers)
-                    request.Headers.Add((string)h.Key, (string)h.Value);
-                if (_useDefaultHeaders)
-                {
-                    foreach (DictionaryEntry h in _headers)
-                    {
-                        // Watch if there is custom header already
-                        if (!headers.ContainsKey(h.Key))
-                            request.Headers.Add((string)h.Key, (string)h.Value);
-                    }
-                }
-
-                // Loading Cookies
-                if (_autoCookies)
-                    request.CookieContainer = _cookies;
-                else
-                    request.CookieContainer = new CookieContainer();
-                if (info.Cookies.Count > 0)
-                {
-                    foreach (Cookie c in info.Cookies)
-                        request.CookieContainer.Add(c);
-                }
-
-                // Write parametr & data... multipart data
-                if (info.Method == RequestMethod.POST)
-                {
-                    using (Stream requestStream = request.GetRequestStream())
-                    {
-                        if (info.WWWFormUrlEncoded)
-                        {
-                            request.ContentType = "application/x-www-form-urlencoded";
-                            string res = "";
-                            foreach (DictionaryEntry pair in info.Parametrs)
-                                res += (string)pair.Key + '=' + (string)pair.Value + '&';
-                            res = res.Remove(res.Length - 1, 1);
-                            requestStream.Write(Encoding.ASCII.GetBytes(res), 0, Encoding.ASCII.GetByteCount(res));
-                        }
-                        else
-                        {
-                            string tmp;
-                            string boundary = getBoundary(request.UserAgent);
-                            request.ContentType = "multipart/form-data; boundary=" + boundary;
-                            if (info.Parametrs.Count > 0)
-                            {
-                                tmp = "";
-                                foreach (DictionaryEntry p in info.Parametrs)
-                                    tmp += string.Format("--{0}\\r\\nContent-Disposition: form-data; name=\"{1}\"\\r\\n\\r\\n{1}\\r\\n", boundary, p.Key, p.Value);
-                                requestStream.Write(Encoding.ASCII.GetBytes(tmp), 0, Encoding.ASCII.GetByteCount(tmp));
-                            }
-                            if (info.Data.Count > 0)
-                            {
-                                foreach (DictionaryEntry d in info.Data)
-                                {
-                                    tmp = string.Format("name=\"{0}\";", (string)d.Key);
-                                    foreach (DictionaryEntry p in (Hashtable)((Hashtable)d.Value)["parametrs"])
-                                        tmp += string.Format(" {0}=\"{1}\";", p.Key, p.Value);
-                                    tmp = tmp.Remove(tmp.Length - 1, 1);
-                                    tmp = string.Format("--{0}\\r\\nContent-Disposition: form-data; {1}\\r\\n", boundary, tmp);
-                                    if ((string)((Hashtable)d.Value)["content"] != "")
-                                        tmp += "Content-Type: " + ((Hashtable)d.Value)["content"] + "\\r\\n";
-                                    tmp += "\\r\\n";
-                                    requestStream.Write(Encoding.ASCII.GetBytes(tmp), 0, Encoding.ASCII.GetByteCount(tmp));
-                                    requestStream.Write((byte[])((Hashtable)d.Value)["data"], 0, ((byte[])((Hashtable)d.Value)["data"]).Length);
-                                }
-                            }
-                            // Closing boundary
-                            tmp = "--" + boundary + "--\\r\\n";
-                            requestStream.Write(Encoding.ASCII.GetBytes(tmp), 0, Encoding.ASCII.GetByteCount(tmp));
-                        }
-                    }
-                }
-                return request;
             }
-            public HttpWebResponse getResponse(HttpRequest info)
+            /// <summary>
+            /// Имя управляющего элемента
+            /// </summary>
+            public string Name { get; private set; }
+            /// <summary>
+            /// Имя файла бинарного содердимого
+            /// </summary>
+            public string FileName { get; private set; }
+            /// <summary>
+            /// MIME тип содержимого
+            /// </summary>
+            public string ContentType { get; private set; }
+            /// <summary>
+            /// Кодировка. Содержимого???
+            /// </summary>
+            public string Charset { get; set; }
+            /// <summary>
+            /// Еще кодировка содердимого? Или тип сжатия содердимого?
+            /// </summary>
+            public string ContentTransferEncoding { get; private set; }
+            /// <summary>
+            /// Бинарные данные
+            /// </summary>
+            public byte[] Data { get; private set; }
+
+            public MultipartData(string name, byte[] data, string fileName = "", string contentType = "", string charset = "", string encoding = "")
             {
-                HttpWebRequest req = null;
-                HttpWebResponse res = null;
-                int attempts = 0;
-                bool success = false;
-                while (!success && attempts < 3)
+                Name = name;
+                FileName = fileName;
+                ContentType = contentType;
+                Charset = charset;
+                ContentTransferEncoding = encoding;
+                Data = data;
+            }
+        }
+        /// <summary>
+        /// Набор некоторых параметров для HttpWebRequest
+        /// </summary>
+        public class RequestParametrs
+        {
+            /// <summary>
+            /// Идентификатор веб-клиента
+            /// </summary>
+            public string UserAgent { get; set; }
+            /// <summary>
+            /// Автоматическая переадресация при загрузке страницы
+            /// </summary>
+            public bool AllowAutoRedirect { get; set; }
+            public bool KeepAlive { get; set; }
+            public int MinimumTimeout { get; set; }
+            public int TimeoutStep { get; set; }
+            public int MaximumTimeout { get; set; }
+            public int TryCount { get; set; }
+            /// <summary>
+            /// Пытатся загрузить страницу любой ценой
+            /// </summary>
+            public bool TryUntilLoad { get; set; }
+            /// <summary>
+            /// Набор заголовков которые добавляються вместе с этим веб-клиентом
+            /// </summary>
+            public Hashtable Headers;
+
+            /// <summary>
+            /// Изменить идентификатор веб-клиента и набор его заголовков
+            /// </summary>
+            /// <param name="userAgent">Новый веб-клиент</param>
+            /// <param name="headers">Новые заголовки</param>
+            public void ChangeBrowser(string userAgent, Hashtable headers)
+            {
+                UserAgent = string.IsNullOrEmpty(userAgent) ? Browser.IE_W7_x64_v11 : userAgent;
+                Headers = headers != null ? headers : Browser.getDefaultHeaders(UserAgent);
+            }
+
+            public RequestParametrs(string useragent = null, Hashtable headers = null, bool autoRedirect = true, bool keepAlive = true)
+            {
+                ChangeBrowser(useragent, headers);
+                AllowAutoRedirect = autoRedirect;
+                KeepAlive = keepAlive;
+
+                MinimumTimeout = 5000;
+                TimeoutStep = 5000;
+                MaximumTimeout = 15000;
+                TryCount = 5;
+                TryUntilLoad = true;
+            }
+        }
+        /// <summary>
+        /// Данные конкретного запроса к конкретному URL
+        /// </summary>
+        public class RequestData
+        {
+            private string _url;
+            /// <summary>
+            /// Адрес, по которому будет выполнен запрос.
+            /// Если метод - GET и указаны параметры то вернет путь с параметрыми
+            /// </summary>
+            public string URL
+            {
+                get
                 {
-                    attempts++;
-                    try
+                    if (Method == RequestMethod.GET && Parametrs.Count > 0)
+                        return WebTools.MergeParametrsToURL(_url, Parametrs);
+                    return _url;
+                }
+                set { _url = value; }
+            }
+            public RequestMethod Method;
+            public Hashtable Parametrs;
+            public Hashtable Headers;
+            public List<MultipartData> Data;
+
+            public RequestData(string url, RequestMethod method, Hashtable headers, Hashtable parametrs = null, List<MultipartData> data = null)
+            {
+                URL = url;
+                Method = method;
+                Parametrs = parametrs != null ? parametrs : new Hashtable();
+                Headers = headers != null ? headers : new Hashtable();
+                Data = data != null ? data : new List<MultipartData>();
+            }
+        }
+        /// <summary>
+        /// Ответ от сервера на запрос
+        /// </summary>
+        public class ResponseData
+        {
+            public HttpWebResponse Response;
+
+            private List<string> _lines = null;
+            private Encoding _lastEncoding = null;
+
+            /// <summary>
+            /// Ссылка на страницу, от которой был получен этот ответ
+            /// </summary>
+            public string Url
+            {
+                get { return Response.ResponseUri.ToString(); }
+            }
+            /// <summary>
+            /// Cookies, полученные вместе с ответом (Отправленные cookies не содержаться здесь)
+            /// </summary>
+            public CookieCollection Cookies
+            {
+                get { return Response.Cookies; }
+            }
+
+            private void _getPage(Encoding encoding)
+            {
+                if (_lines == null || _lastEncoding != encoding)
+                {
+                    _lastEncoding = encoding;
+                    _lines = new List<string>();
+                    using (StreamReader reader = new StreamReader(Response.GetResponseStream(), _lastEncoding))
                     {
-                        req = assambleRequest(info);
-                        res = (HttpWebResponse)req.GetResponse();
-                        success = true;
+                        while (!reader.EndOfStream)
+                            _lines.Add(reader.ReadLine());
                     }
-                    catch (WebException WebEx)
-                    {
-                        if (WebEx.Status == WebExceptionStatus.ConnectFailure)
-                            attempts = 3;
-                        res = (HttpWebResponse)WebEx.Response;
-                    }
+                }
+            }
+            private Encoding _chooseEncoding(string encoding)
+            {
+                Encoding res;
+                try
+                {
+                    res = Encoding.GetEncoding(encoding);
+                }
+                catch (ArgumentException)
+                {
+                    res = _lastEncoding == null ? Encoding.UTF8 : _lastEncoding;
                 }
                 return res;
             }
-            public HttpAnswer getAnswer(HttpRequest info)
+
+            #region Список строк
+            public List<string> GetLines(Encoding encoding)
             {
-                return new HttpAnswer(getResponse(info));
+                _getPage(encoding);
+                return _lines;
+            }
+            public List<string> GetLines(string encoding)
+            {
+                return GetLines(_chooseEncoding(encoding));
+            }
+            #endregion
+            public List<string> Lines
+            {
+                get
+                {
+                    return GetLines(_chooseEncoding(""));
+                }
+            }            
+            #region Страница строкой
+            public string GetPage(Encoding encoding, string separator)
+            {
+                return string.Join(separator, GetLines(encoding));
+            }
+            public string GetPage(string encoding, string separator)
+            {
+                return string.Join(separator, GetLines(encoding));
+            }
+            public string GetPage(Encoding encoding)
+            {
+                return GetPage(encoding, Environment.NewLine);
+            }
+            public string GetPage(string encoding)
+            {
+                return GetPage(encoding, Environment.NewLine);
+            }
+            #endregion
+            public string Page
+            {
+                get
+                {
+                    return GetPage(Response.ContentEncoding);
+                }
             }
 
-            public PirateHTTP()
+            public ResponseData(HttpWebResponse response)
             {
-                UserAgent = Browser.IE_W7_x64_v11;
-                _autoRedirect = true;
-                _keepAlive = true;
-                _autoCookies = false;
-                _timeout = 0;
-                _useDefaultHeaders = false;
-
-                _cookies = new CookieContainer();
-                _headers = new Hashtable();
-                _headers.Add("Accept-Encoding", "gzip, deflate");
-                _headers.Add("Accept-Language", "ru-RU,ru;q=0.8,en-US;q=0.6,en;q=0.4");
-                _headers.Add("Accept", "*/*");
+                Response = response;
             }
+        }
+
+        public class SimpleHttpBrowser
+        {
+            /// <summary>
+            /// Параметры HTTP клиента
+            /// </summary>
+            public      RequestParametrs    Parametrs;
+            /// <summary>
+            /// Данные запроса, который будет отправлен
+            /// </summary>
+            public      RequestData         Data;
+            /// <summary>
+            /// Ответ на последний отправленный запрос
+            /// </summary>
+            public      ResponseData        Response = null;
+
+            /// <summary>
+            /// Подготавливает запрос исходя из указанных данных и передает ссылку на него.
+            /// Метод выполняет полный пересбор запроса каждый раз
+            /// </summary>
+            /// <param name="cookies">Cookies для будущего запроса</param>
+            /// <returns>Сформированный экземпляр HttpWebRequest</returns>
+            public HttpWebRequest GetRequest(CookieCollection cookies)
+            {
+                return WebTools.PrepareWebRequest(cookies, Parametrs, Data);
+            }
+            /// <summary>
+            /// Подготавливает запрос исходя из указанных данных и передает ссылку на него.
+            /// Метод выполняет полный пересбор запроса каждый раз
+            /// </summary>
+            /// <param name="cookies">Cookies запроса</param>
+            /// <returns>Ответ от выполненного запроса HttpWebRequest</returns>
+            public HttpWebResponse GetResponse(ref CookieCollection cookies)
+            {
+                if (cookies == null)
+                    cookies = new CookieCollection();
+                HttpWebRequest req = GetRequest(cookies);
+                HttpWebResponse response = null;
+                int errors = 0;
+                bool success = false;
+                while (!success)
+                {
+                    try
+                    {
+                        response = (HttpWebResponse)req.GetResponse();
+                        cookies.Add(response.Cookies);
+                        switch (response.StatusCode)
+                        {
+                            case HttpStatusCode.OK:
+                                success = true;
+                                break;
+                            case HttpStatusCode.Redirect:
+                                if (Parametrs.AllowAutoRedirect)
+                                    req = WebTools.PrepareWebRequest(cookies, Parametrs, new RequestData(WebTools.RedirectURL(req.RequestUri.OriginalString, response.Headers["Location"]), RequestMethod.GET, null));
+                                else
+                                    goto case HttpStatusCode.OK;
+                                break;
+                            default:
+                                goto case HttpStatusCode.OK;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        if (errors <= Parametrs.TryCount)
+                        {
+                            errors++;
+                        }
+                        else
+                            success = true;
+                    }
+                }
+                Response = new ResponseData(response);
+                return response;
+            }
+            /// <summary>
+            /// Подготавливает запрос исходя из указанных данных и передает ссылку на него.
+            /// Метод выполняет полный пересбор запроса каждый раз
+            /// </summary>
+            /// <param name="cookies">Cookies запроса</param>
+            /// <param name="data">Данные запроса</param>
+            /// <returns>Ответ от выполненного запроса HttpWebRequest</returns>
+            public HttpWebResponse GetResponse(ref CookieCollection cookies, RequestData data)
+            {
+                Data = data;
+                return GetResponse(ref cookies);
+            }
+            public ResponseData GetResponseData(ref CookieCollection cookies)
+            {
+                GetResponse(ref cookies);
+                return Response;
+            }
+            public ResponseData GetResponseData(ref CookieCollection cookies, RequestData data)
+            {
+                Data = data;
+                return GetResponseData(ref cookies);
+            }
+
+            public SimpleHttpBrowser(RequestParametrs defaultParametrs = null)
+            {
+                Parametrs = defaultParametrs == null ? new RequestParametrs() : defaultParametrs;
+            }
+            public SimpleHttpBrowser() : this(null) { }
         }
 
         public static class WebTools
         {
             public const string srcPattern = "src\\s*=\\s*(?:[\"'](?<1>[^\"']*)[\"']|(?<1>\\S+))";
+
+            /// <summary>
+            /// Задает начальные настройки для запроса
+            /// </summary>
+            private static void _baseSettings(HttpWebRequest webRequest, RequestParametrs parametrs)
+            {
+                webRequest.ServicePoint.Expect100Continue = false; // strange shit should be disabled
+                webRequest.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                webRequest.ProtocolVersion = HttpVersion.Version11;
+
+                webRequest.AllowAutoRedirect = false;
+                webRequest.UserAgent = parametrs.UserAgent;
+                webRequest.KeepAlive = parametrs.KeepAlive;
+                webRequest.Timeout = parametrs.MinimumTimeout;
+            }
+            /// <summary>
+            /// Объединяет заголовки браузера и заголовки данных запроса с приоритетом заголовков данных запроса.
+            /// Переносит константные заголовки из общего списка в параметры запроса и добавляет заголовки в запрос.
+            /// </summary>
+            private static void _addHeaders(HttpWebRequest webRequest, Hashtable defaultHeaders, Hashtable headers)
+            {
+                Hashtable newHeaders = new Hashtable(headers);
+                foreach (DictionaryEntry h in defaultHeaders)
+                    if (!headers.ContainsKey(h.Key))
+                        headers.Add(h.Key, h.Value);
+
+                if (newHeaders.ContainsKey("Accept"))
+                {
+                    webRequest.Accept = (string)newHeaders["Accept"];
+                    newHeaders.Remove("Accept");
+                }
+                if (newHeaders.ContainsKey("Referer"))
+                {
+                    webRequest.Referer = (string)newHeaders["Referer"];
+                    newHeaders.Remove("Referer");
+                }
+                if (newHeaders.ContainsKey("Expect"))
+                {
+                    webRequest.Expect = (string)newHeaders["Expect"];
+                    newHeaders.Remove("Expect");
+                }
+                if (newHeaders.ContainsKey("Host"))
+                {
+                    webRequest.Host = (string)newHeaders["Host"];
+                    newHeaders.Remove("Host");
+                }
+
+                foreach (DictionaryEntry h in newHeaders)
+                    webRequest.Headers.Add((string)h.Key, (string)h.Value);
+
+                newHeaders.Clear();
+            }
+            /// <summary>
+            /// Добавляет cookies к запросу если они есть
+            /// </summary>
+            /// <param name="cookies">Cookies</param>
+            private static void _addCookies(HttpWebRequest webRequest, CookieCollection cookies)
+            {
+                webRequest.CookieContainer = new CookieContainer();
+                if (cookies != null)
+                {
+                    foreach (Cookie c in cookies)
+                        webRequest.CookieContainer.Add(c);
+                }
+            }
+            private static void _processPOST(HttpWebRequest webRequest, RequestData data, string userAgent)
+            {
+                string boundary = Browser.getBoundary(userAgent);
+                string tmp;
+                byte[] tb;
+                using (Stream requestStream = webRequest.GetRequestStream())
+                {
+                    if (data.Data.Count > 0)
+                    {
+                        webRequest.ContentType = "Content-Type: multipart/form-data; " + boundary;
+                        if (data.Parametrs.Count > 0)
+                        {
+                            tmp = "";
+                            foreach (DictionaryEntry p in data.Parametrs)
+                            {
+                                tmp += string.Format("--{0}\\r\\nContent-Disposition: form-data; name=\"{1}\"\\r\\n\\r\\n{2}\\r\\n",
+                                    boundary, p.Key, p.Value);
+                            }
+                            tb = Encoding.ASCII.GetBytes(tmp);
+                            requestStream.Write(tb, 0, tb.Length);
+
+                        }
+                        tmp = "";
+                        foreach (MultipartData d in data.Data)
+                        {
+                            tmp += string.Format("--{0}\\r\\n{1}\\r\\n", boundary, d.Header);
+                            tb = Encoding.ASCII.GetBytes(tmp);
+                            requestStream.Write(tb, 0, tb.Length);
+                            requestStream.Write(d.Data, 0, d.Data.Length);
+                        }
+
+                        // Closing boundary
+                        string b_end = "--" + boundary + "--\\r\\n";
+                        requestStream.Write(Encoding.ASCII.GetBytes(b_end), 0, Encoding.ASCII.GetByteCount(b_end));
+                    }
+                    else if (data.Parametrs.Count > 0)
+                    {
+                        webRequest.ContentType = "application/x-www-form-urlencoded";
+                        string t = "";
+                        foreach (DictionaryEntry p in data.Parametrs)
+                            t += string.Format("{0}={1}&", boundary, p.Key, p.Value);
+                        requestStream.WriteAsync(Encoding.ASCII.GetBytes(t), 0, Encoding.ASCII.GetByteCount(t));
+                    }
+                }
+            }
+            public static HttpWebRequest PrepareWebRequest(CookieCollection cookies, RequestParametrs parametrs, RequestData data)
+            {
+                HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(data.URL);
+                webRequest.Method = data.Method.ToString("F");
+                _baseSettings(webRequest, parametrs);
+
+                _addHeaders(webRequest, parametrs.Headers, data.Headers);
+                _addCookies(webRequest, cookies);
+
+                // Write parametr & data/multipart data
+                switch (data.Method)
+                {
+                    case RequestMethod.POST:
+                        _processPOST(webRequest, data, parametrs.UserAgent);
+                        break;
+                }
+                return webRequest;
+            }
+
+            public static string RedirectURL(string oldUrl, string redirectUrl)
+            {
+                if (redirectUrl[0] == '/')
+                {
+                    Uri oldUri = new Uri(oldUrl);
+                    return oldUri.Scheme + "://" + oldUri.Host + redirectUrl;
+                }
+                else
+                    return redirectUrl;
+            }
 
             public static CookieCollection parseCookies(CookieContainer _cookies)
             {
@@ -599,6 +572,37 @@ namespace MyLib
                         CookieCollection cookies = (CookieCollection)pathList[key];
                         foreach (Cookie cookie in cookies)
                             res.Add(cookie);
+                    }
+                }
+                return res;
+            }
+            private static string ToUriInfo(Hashtable parametrs)
+            {
+                string res = "";
+                foreach (DictionaryEntry e in parametrs)
+                    res += (string)e.Key + '=' + (string)e.Value + '&';
+                return res.Remove(res.Length - 1, 1);
+            }
+            public static string MergeParametrsToURL(string url, Hashtable parametrs)
+            {
+                string res = url + '?' + ToUriInfo(parametrs);
+                return res;
+            }
+            public static string MergeParametrsToURL(Uri url, Hashtable parametrs)
+            {
+                return MergeParametrsToURL(url.OriginalString, parametrs);
+            }
+            public static Hashtable ParseUrlQuery(string url)
+            {
+                Hashtable res = new Hashtable();
+                if (url.IndexOf('?') > 0)
+                {
+                    url = url.Remove(0, url.IndexOf('?') + 1);
+                    string[] p;
+                    foreach (string pair in url.Split('&'))
+                    {
+                        p = pair.Split('=');
+                        res.Add(p[0], p[1]);
                     }
                 }
                 return res;

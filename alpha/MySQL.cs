@@ -161,7 +161,3 @@ public class TMySQL
     }
 
 }
-public static class MySQLConverter
-{
-
-}

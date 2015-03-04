@@ -614,6 +614,7 @@ public static class externalIP
     /// </summary>
     public static string Get()
     {
+        return "127.0.0.1";
         l_answer = "";
         wait = waitStep;
         while (l_answer == "")
