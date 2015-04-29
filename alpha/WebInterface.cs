@@ -417,6 +417,11 @@ public class TWebInterface
                 return newResponse;
             }
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SUPER EXCEPTION : " + ex.Message);
+            throw ex;
+        }
     }
 
     private string[] _empty()

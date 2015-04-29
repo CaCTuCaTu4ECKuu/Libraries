@@ -218,6 +218,7 @@ namespace MyLib
 
             private List<string> _lines = null;
             private Encoding _lastEncoding = null;
+            private byte[] _bytes = null;
 
             /// <summary>
             /// Ссылка на страницу, от которой был получен этот ответ
@@ -304,6 +305,26 @@ namespace MyLib
                     return GetPage(Response.ContentEncoding);
                 }
             }
+            public byte[] Bytes
+            {
+                get
+                {
+                    if (_bytes == null)
+                    {
+                        Stream source = Response.GetResponseStream();
+                        MemoryStream ms;
+                        int read;
+                        byte[] buffer = new byte[16 * 1024];
+                        using (ms = new MemoryStream())
+                        {
+                            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                                ms.Write(buffer, 0, read);
+                        }
+                        _bytes = ms.ToArray();
+                    }
+                    return _bytes;
+                }
+            }
 
             public ResponseData(HttpWebResponse response)
             {
@@ -325,6 +346,8 @@ namespace MyLib
             /// Ответ на последний отправленный запрос
             /// </summary>
             public      ResponseData        Response = null;
+
+            internal CookieCollection t_cookies;
 
             /// <summary>
             /// Подготавливает запрос исходя из указанных данных и передает ссылку на него.
@@ -384,6 +407,11 @@ namespace MyLib
                 Response = new ResponseData(response);
                 return response;
             }
+            public HttpWebResponse GetResponse()
+            {
+                t_cookies = new CookieCollection();
+                return GetResponse(ref t_cookies);
+            }
             /// <summary>
             /// Подготавливает запрос исходя из указанных данных и передает ссылку на него.
             /// Метод выполняет полный пересбор запроса каждый раз
@@ -400,6 +428,11 @@ namespace MyLib
             {
                 GetResponse(ref cookies);
                 return Response;
+            }
+            public ResponseData GetResponseData()
+            {
+                t_cookies = new CookieCollection();
+                return GetResponseData(ref t_cookies);
             }
             public ResponseData GetResponseData(ref CookieCollection cookies, RequestData data)
             {
